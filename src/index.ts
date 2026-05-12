@@ -596,11 +596,43 @@ Please provide:
     });
   }
 
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
+ async run(): Promise<void> {
+    const useStdio = process.argv.includes('--stdio') || process.env.MCP_TRANSPORT === 'stdio';
 
-    process.stderr.write('Questrade MCP server running on stdio\n');
+    if (useStdio) {
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      process.stderr.write('Questrade MCP server running on stdio\n');
+      return;
+    }
+
+    const express = (await import('express')).default;
+    const cors = (await import('cors')).default;
+    const { SSEServerTransport } = await import('@modelcontextprotocol/sdk/server/sse.js');
+
+    const app = express();
+    app.use(cors());
+    app.use(express.json());
+
+    let sseTransport: InstanceType<typeof SSEServerTransport> | null = null;
+
+    app.get('/sse', async (req, res) => {
+      sseTransport = new SSEServerTransport('/message', res);
+      await this.server.connect(sseTransport);
+    });
+
+    app.post('/message', async (req, res) => {
+      if (sseTransport) {
+        await sseTransport.handlePostMessage(req, res);
+      } else {
+        res.status(400).json({ error: 'No SSE connection established' });
+      }
+    });
+
+    const port = process.env.PORT || 8000;
+    app.listen(port, () => {
+      process.stderr.write(`Questrade MCP server running on HTTP/SSE at port ${port}\n`);
+    });
   }
 }
 
