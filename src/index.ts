@@ -612,7 +612,6 @@ Please provide:
 
     const app = express();
     app.use(cors());
-    app.use(express.json());
 
     let sseTransport: InstanceType<typeof SSEServerTransport> | null = null;
 
