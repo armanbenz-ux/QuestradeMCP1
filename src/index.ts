@@ -240,14 +240,15 @@ class QuestradeServer {
 
           // ── Massive: Stocks ──────────────────────────────────────────────
           {
-            name: 'massive_stock_snapshot',
-            description: 'Get current price, OHLC, volume, VWAP, and day change for a US stock',
+            name: 'massive_stock_open_close',
+            description: 'Get opening and closing prices for a stock on a specific date (pre-market and after-hours included)',
             inputSchema: {
               type: 'object',
               properties: {
                 ticker: { type: 'string', description: 'Stock ticker symbol (e.g. AAPL)' },
+                date: { type: 'string', description: 'Date YYYY-MM-DD' },
               },
-              required: ['ticker'],
+              required: ['ticker', 'date'],
             },
           },
           {
@@ -361,33 +362,6 @@ class QuestradeServer {
 
           // ── Massive: Options ─────────────────────────────────────────────
           {
-            name: 'massive_options_chain',
-            description: 'Get the full options chain for a stock with greeks (delta, gamma, theta, vega), IV, and open interest',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                ticker: { type: 'string', description: 'Underlying stock ticker (e.g. AAPL)' },
-                expiration_date: { type: 'string', description: 'Filter by expiry date YYYY-MM-DD' },
-                contract_type: { type: 'string', description: 'call or put' },
-                strike_price: { type: 'number', description: 'Filter by strike price' },
-                limit: { type: 'number', description: 'Max contracts to return (default 50)' },
-              },
-              required: ['ticker'],
-            },
-          },
-          {
-            name: 'massive_option_snapshot',
-            description: 'Get full snapshot for a single options contract: greeks, IV, open interest, break-even, last trade/quote',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                underlying_ticker: { type: 'string', description: 'Underlying stock ticker (e.g. AAPL)' },
-                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
-              },
-              required: ['underlying_ticker', 'option_ticker'],
-            },
-          },
-          {
             name: 'massive_options_contracts',
             description: 'Search for options contracts by underlying ticker, expiry, strike, or type',
             inputSchema: {
@@ -415,6 +389,40 @@ class QuestradeServer {
                 to: { type: 'string', description: 'End date YYYY-MM-DD' },
               },
               required: ['option_ticker', 'multiplier', 'timespan', 'from', 'to'],
+            },
+          },
+          {
+            name: 'massive_option_prev_day',
+            description: 'Get the previous trading day OHLCV for a specific options contract',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
+              },
+              required: ['option_ticker'],
+            },
+          },
+          {
+            name: 'massive_option_open_close',
+            description: 'Get opening and closing price for an options contract on a specific date',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
+                date: { type: 'string', description: 'Date YYYY-MM-DD' },
+              },
+              required: ['option_ticker', 'date'],
+            },
+          },
+          {
+            name: 'massive_option_contract_details',
+            description: 'Get full reference details for a specific options contract: type (call/put), expiry, strike, exercise style, shares per contract',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
+              },
+              required: ['option_ticker'],
             },
           },
         ],
@@ -569,10 +577,11 @@ class QuestradeServer {
             };
 
           // ── Massive: Stocks ──────────────────────────────────────────────
-          case 'massive_stock_snapshot': {
-            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+          case 'massive_stock_open_close': {
+            if (!args?.ticker || !args?.date)
+              throw new McpError(ErrorCode.InvalidParams, 'ticker and date are required');
             const massive = this.initializeMassiveClient();
-            const result = await massive.getStockSnapshot(args.ticker as string);
+            const result = await massive.getStockOpenClose(args.ticker as string, args.date as string);
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
 
@@ -664,29 +673,6 @@ class QuestradeServer {
           }
 
           // ── Massive: Options ─────────────────────────────────────────────
-          case 'massive_options_chain': {
-            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
-            const massive = this.initializeMassiveClient();
-            const params: Record<string, unknown> = {};
-            if (args.expiration_date) params['expiration_date'] = args.expiration_date;
-            if (args.contract_type) params['contract_type'] = args.contract_type;
-            if (args.strike_price) params['strike_price'] = args.strike_price;
-            if (args.limit) params['limit'] = args.limit;
-            const result = await massive.getOptionsChain(args.ticker as string, params);
-            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-          }
-
-          case 'massive_option_snapshot': {
-            if (!args?.underlying_ticker || !args?.option_ticker)
-              throw new McpError(ErrorCode.InvalidParams, 'underlying_ticker and option_ticker are required');
-            const massive = this.initializeMassiveClient();
-            const result = await massive.getOptionSnapshot(
-              args.underlying_ticker as string,
-              args.option_ticker as string
-            );
-            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-          }
-
           case 'massive_options_contracts': {
             const massive = this.initializeMassiveClient();
             const params: Record<string, unknown> = {};
@@ -710,6 +696,28 @@ class QuestradeServer {
               args.from as string,
               args.to as string
             );
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_option_prev_day': {
+            if (!args?.option_ticker) throw new McpError(ErrorCode.InvalidParams, 'option_ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getOptionPrevDay(args.option_ticker as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_option_open_close': {
+            if (!args?.option_ticker || !args?.date)
+              throw new McpError(ErrorCode.InvalidParams, 'option_ticker and date are required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getOptionOpenClose(args.option_ticker as string, args.date as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_option_contract_details': {
+            if (!args?.option_ticker) throw new McpError(ErrorCode.InvalidParams, 'option_ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getOptionContractDetails(args.option_ticker as string);
             return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
           }
 

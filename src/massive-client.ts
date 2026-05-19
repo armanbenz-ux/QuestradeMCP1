@@ -10,14 +10,7 @@ export class MassiveClient {
     });
   }
 
-  // ── Stocks ────────────────────────────────────────────────────────────────
-
-  async getStockSnapshot(ticker: string) {
-    const { data } = await this.http.get(
-      `/v2/snapshot/locale/us/markets/stocks/tickers/${ticker.toUpperCase()}`
-    );
-    return data;
-  }
+  // ── Stocks (all available on free Stocks Basic plan) ──────────────────────
 
   async getStockBars(
     ticker: string,
@@ -37,6 +30,13 @@ export class MassiveClient {
   async getStockPrevDay(ticker: string) {
     const { data } = await this.http.get(
       `/v2/aggs/ticker/${ticker.toUpperCase()}/prev`
+    );
+    return data;
+  }
+
+  async getStockOpenClose(ticker: string, date: string) {
+    const { data } = await this.http.get(
+      `/v1/open-close/${ticker.toUpperCase()}/${date}`
     );
     return data;
   }
@@ -87,25 +87,17 @@ export class MassiveClient {
     return data;
   }
 
-  // ── Options ───────────────────────────────────────────────────────────────
-
-  async getOptionsChain(underlying: string, params: Record<string, unknown> = {}) {
-    const { data } = await this.http.get(
-      `/v3/snapshot/options/${underlying.toUpperCase()}`,
-      { params }
-    );
-    return data;
-  }
-
-  async getOptionSnapshot(underlying: string, optionTicker: string) {
-    const { data } = await this.http.get(
-      `/v3/snapshot/options/${underlying.toUpperCase()}/${optionTicker}`
-    );
-    return data;
-  }
+  // ── Options (all available on free Options Basic plan) ────────────────────
 
   async getOptionsContracts(params: Record<string, unknown> = {}) {
     const { data } = await this.http.get('/v3/reference/options/contracts', { params });
+    return data;
+  }
+
+  async getOptionContractDetails(optionTicker: string) {
+    const { data } = await this.http.get(
+      `/v3/reference/options/contracts/${optionTicker}`
+    );
     return data;
   }
 
@@ -124,6 +116,11 @@ export class MassiveClient {
 
   async getOptionPrevDay(optionTicker: string) {
     const { data } = await this.http.get(`/v2/aggs/ticker/${optionTicker}/prev`);
+    return data;
+  }
+
+  async getOptionOpenClose(optionTicker: string, date: string) {
+    const { data } = await this.http.get(`/v1/open-close/${optionTicker}/${date}`);
     return data;
   }
 }
