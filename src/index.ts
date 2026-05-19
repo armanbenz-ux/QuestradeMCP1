@@ -14,6 +14,7 @@ import {
 import { QuestradeClient } from './questrade-client.js';
 import { QuestradeConfig } from './types.js';
 import { TokenManager } from './token-manager.js';
+import { MassiveClient } from './massive-client.js';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -22,6 +23,7 @@ class QuestradeServer {
   private server: Server;
   private client: QuestradeClient | null = null;
   private tokenManager: TokenManager;
+  private massiveClient: MassiveClient | null = null;
 
   constructor() {
     this.tokenManager = new TokenManager();
@@ -72,6 +74,19 @@ class QuestradeServer {
     }
 
     return this.client;
+  }
+
+  private initializeMassiveClient(): MassiveClient {
+    if (this.massiveClient) return this.massiveClient;
+    const apiKey = process.env.MASSIVE_API_KEY;
+    if (!apiKey) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        'MASSIVE_API_KEY environment variable is not set'
+      );
+    }
+    this.massiveClient = new MassiveClient(apiKey);
+    return this.massiveClient;
   }
 
   private setupToolHandlers(): void {
@@ -220,6 +235,186 @@ class QuestradeServer {
             inputSchema: {
               type: 'object',
               properties: {},
+            },
+          },
+
+          // ── Massive: Stocks ──────────────────────────────────────────────
+          {
+            name: 'massive_stock_snapshot',
+            description: 'Get current price, OHLC, volume, VWAP, and day change for a US stock',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol (e.g. AAPL)' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_stock_bars',
+            description: 'Get historical OHLCV bars for a stock over a custom date range and interval',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+                multiplier: { type: 'number', description: 'Bar size multiplier (e.g. 1, 5, 15)' },
+                timespan: { type: 'string', description: 'Bar size unit: minute, hour, day, week, month' },
+                from: { type: 'string', description: 'Start date YYYY-MM-DD' },
+                to: { type: 'string', description: 'End date YYYY-MM-DD' },
+                adjusted: { type: 'boolean', description: 'Adjust for splits (default true)' },
+              },
+              required: ['ticker', 'multiplier', 'timespan', 'from', 'to'],
+            },
+          },
+          {
+            name: 'massive_stock_prev_close',
+            description: 'Get the previous trading day OHLCV for a stock',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_ticker_details',
+            description: 'Get company details: name, description, market cap, sector, exchange, logo',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_technical_indicator',
+            description: 'Get SMA, EMA, RSI, or MACD values for a stock',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+                indicator: { type: 'string', description: 'Indicator type: sma, ema, rsi, macd' },
+                window: { type: 'number', description: 'Lookback period (e.g. 14 for RSI, 20 for SMA)' },
+                timespan: { type: 'string', description: 'Bar size: minute, hour, day (default day)' },
+                series_type: { type: 'string', description: 'Price field: close, open, high, low (default close)' },
+                limit: { type: 'number', description: 'Number of data points to return' },
+              },
+              required: ['ticker', 'indicator'],
+            },
+          },
+          {
+            name: 'massive_stock_news',
+            description: 'Get recent news articles for a stock or the broader market',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Filter by ticker symbol (optional)' },
+                limit: { type: 'number', description: 'Number of articles (default 10, max 50)' },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'massive_market_status',
+            description: 'Get current US market open/closed status for stocks, options, and futures',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+            },
+          },
+          {
+            name: 'massive_dividends',
+            description: 'Get dividend history for a stock',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+                limit: { type: 'number', description: 'Number of records to return' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_splits',
+            description: 'Get stock split history for a ticker',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_related_companies',
+            description: 'Get a list of companies related to a given ticker based on news and returns data',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Stock ticker symbol' },
+              },
+              required: ['ticker'],
+            },
+          },
+
+          // ── Massive: Options ─────────────────────────────────────────────
+          {
+            name: 'massive_options_chain',
+            description: 'Get the full options chain for a stock with greeks (delta, gamma, theta, vega), IV, and open interest',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                ticker: { type: 'string', description: 'Underlying stock ticker (e.g. AAPL)' },
+                expiration_date: { type: 'string', description: 'Filter by expiry date YYYY-MM-DD' },
+                contract_type: { type: 'string', description: 'call or put' },
+                strike_price: { type: 'number', description: 'Filter by strike price' },
+                limit: { type: 'number', description: 'Max contracts to return (default 50)' },
+              },
+              required: ['ticker'],
+            },
+          },
+          {
+            name: 'massive_option_snapshot',
+            description: 'Get full snapshot for a single options contract: greeks, IV, open interest, break-even, last trade/quote',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                underlying_ticker: { type: 'string', description: 'Underlying stock ticker (e.g. AAPL)' },
+                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
+              },
+              required: ['underlying_ticker', 'option_ticker'],
+            },
+          },
+          {
+            name: 'massive_options_contracts',
+            description: 'Search for options contracts by underlying ticker, expiry, strike, or type',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                underlying_ticker: { type: 'string', description: 'Underlying stock ticker' },
+                contract_type: { type: 'string', description: 'call or put' },
+                expiration_date: { type: 'string', description: 'Expiry date YYYY-MM-DD' },
+                strike_price: { type: 'number', description: 'Strike price' },
+                limit: { type: 'number', description: 'Max results to return' },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'massive_option_bars',
+            description: 'Get historical OHLCV bars for a specific options contract',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                option_ticker: { type: 'string', description: 'Option contract ticker (e.g. O:AAPL250117C00150000)' },
+                multiplier: { type: 'number', description: 'Bar size multiplier' },
+                timespan: { type: 'string', description: 'Bar size unit: minute, hour, day' },
+                from: { type: 'string', description: 'Start date YYYY-MM-DD' },
+                to: { type: 'string', description: 'End date YYYY-MM-DD' },
+              },
+              required: ['option_ticker', 'multiplier', 'timespan', 'from', 'to'],
             },
           },
         ],
@@ -372,6 +567,151 @@ class QuestradeServer {
                 },
               ],
             };
+
+          // ── Massive: Stocks ──────────────────────────────────────────────
+          case 'massive_stock_snapshot': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getStockSnapshot(args.ticker as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_stock_bars': {
+            if (!args?.ticker || !args?.multiplier || !args?.timespan || !args?.from || !args?.to)
+              throw new McpError(ErrorCode.InvalidParams, 'ticker, multiplier, timespan, from, to are required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getStockBars(
+              args.ticker as string,
+              args.multiplier as number,
+              args.timespan as string,
+              args.from as string,
+              args.to as string,
+              args.adjusted !== false
+            );
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_stock_prev_close': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getStockPrevDay(args.ticker as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_ticker_details': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getTickerDetails(args.ticker as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_technical_indicator': {
+            if (!args?.ticker || !args?.indicator)
+              throw new McpError(ErrorCode.InvalidParams, 'ticker and indicator are required');
+            const validIndicators = ['sma', 'ema', 'rsi', 'macd'];
+            if (!validIndicators.includes(args.indicator as string))
+              throw new McpError(ErrorCode.InvalidParams, 'indicator must be sma, ema, rsi, or macd');
+            const massive = this.initializeMassiveClient();
+            const params: Record<string, unknown> = {};
+            if (args.window) params['window'] = args.window;
+            if (args.timespan) params['timespan'] = args.timespan;
+            if (args.series_type) params['series_type'] = args.series_type;
+            if (args.limit) params['limit'] = args.limit;
+            const result = await massive.getTechnicalIndicator(
+              args.indicator as 'sma' | 'ema' | 'rsi' | 'macd',
+              args.ticker as string,
+              params
+            );
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_stock_news': {
+            const massive = this.initializeMassiveClient();
+            const params: Record<string, unknown> = {};
+            if (args?.ticker) params['ticker'] = (args.ticker as string).toUpperCase();
+            if (args?.limit) params['limit'] = args.limit;
+            const result = await massive.getNews(params);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_market_status': {
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getMarketStatus();
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_dividends': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const params: Record<string, unknown> = { ticker: (args.ticker as string).toUpperCase() };
+            if (args.limit) params['limit'] = args.limit;
+            const result = await massive.getDividends(params);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_splits': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getSplits({ ticker: (args.ticker as string).toUpperCase() });
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_related_companies': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getRelatedCompanies(args.ticker as string);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          // ── Massive: Options ─────────────────────────────────────────────
+          case 'massive_options_chain': {
+            if (!args?.ticker) throw new McpError(ErrorCode.InvalidParams, 'ticker is required');
+            const massive = this.initializeMassiveClient();
+            const params: Record<string, unknown> = {};
+            if (args.expiration_date) params['expiration_date'] = args.expiration_date;
+            if (args.contract_type) params['contract_type'] = args.contract_type;
+            if (args.strike_price) params['strike_price'] = args.strike_price;
+            if (args.limit) params['limit'] = args.limit;
+            const result = await massive.getOptionsChain(args.ticker as string, params);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_option_snapshot': {
+            if (!args?.underlying_ticker || !args?.option_ticker)
+              throw new McpError(ErrorCode.InvalidParams, 'underlying_ticker and option_ticker are required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getOptionSnapshot(
+              args.underlying_ticker as string,
+              args.option_ticker as string
+            );
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_options_contracts': {
+            const massive = this.initializeMassiveClient();
+            const params: Record<string, unknown> = {};
+            if (args?.underlying_ticker) params['underlying_ticker'] = (args.underlying_ticker as string).toUpperCase();
+            if (args?.contract_type) params['contract_type'] = args.contract_type;
+            if (args?.expiration_date) params['expiration_date'] = args.expiration_date;
+            if (args?.strike_price) params['strike_price'] = args.strike_price;
+            if (args?.limit) params['limit'] = args.limit;
+            const result = await massive.getOptionsContracts(params);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
+
+          case 'massive_option_bars': {
+            if (!args?.option_ticker || !args?.multiplier || !args?.timespan || !args?.from || !args?.to)
+              throw new McpError(ErrorCode.InvalidParams, 'option_ticker, multiplier, timespan, from, to are required');
+            const massive = this.initializeMassiveClient();
+            const result = await massive.getOptionBars(
+              args.option_ticker as string,
+              args.multiplier as number,
+              args.timespan as string,
+              args.from as string,
+              args.to as string
+            );
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          }
 
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
